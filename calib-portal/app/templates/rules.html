@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>设备允差规则</title>
+<style>
+:root { --blue:#1a56a8; --grey:#666; --line:#d0d7de; }
+body { font-family:"PingFang SC","Microsoft YaHei",sans-serif;
+       margin:0; background:#f5f7fa; color:#1f2933; }
+header { background:var(--blue); color:#fff; padding:14px 28px; }
+header a { color:#cfe2ff; margin-right:16px; font-size:13px; }
+main { max-width:1100px; margin:24px auto; padding:0 20px; }
+.card { background:#fff; border:1px solid var(--line); border-radius:8px;
+        padding:20px 24px; margin-bottom:22px; }
+h2 { margin-top:0; font-size:17px; }
+table { width:100%; border-collapse:collapse; font-size:13px; }
+th,td { border:1px solid var(--line); padding:7px 9px; text-align:left; }
+th { background:#eef2f7; }
+a { color:var(--blue); }
+.muted { color:var(--grey); font-size:12px; }
+button { background:var(--blue); color:#fff; border:0; border-radius:6px;
+         padding:8px 18px; font-size:14px; cursor:pointer; }
+button:disabled { background:#9aa5b1; cursor:not-allowed; }
+input[type=file] { padding:8px 10px; }
+.err { color:#b42318; } .ok { color:#17612b; }
+ul.errors { margin:8px 0; color:#b42318; font-size:13px; }
+.tag { display:inline-block; padding:2px 8px; border-radius:10px; font-size:12px; }
+.tag-active { background:#d3f9d8; color:#17612b; }
+.tag-old { background:#e9ecef; color:#666; }
+pre { background:#f6f8fa; border:1px solid var(--line); border-radius:6px;
+      padding:10px; overflow:auto; font-size:12px; }
+</style>
+</head>
+<body>
+<header>
+  <strong>设备允差规则</strong>
+  <a href="/">← 返回批次列表</a>
+</header>
+<main>
+  <div class="card">
+    <h2>上传规则 CSV（整份替换活动规则）</h2>
+    <p class="muted">
+      必需列：<code>设备编号</code>、<code>允差L</code>（正数）、
+      <code>扩展不确定度U</code>（非负数）。设备编号重复、缺列、数值无效时
+      <strong>整份拒收</strong>，原有活动规则继续有效。上传成功后新规则立即生效。
+    </p>
+    <form id="rules-form">
+      <input type="file" id="rules-file" name="file" accept=".csv" required>
+      <button type="submit">上传并启用</button>
+      <div id="msg" style="margin-top:10px;font-size:13px"></div>
+      <ul class="errors" id="errors"></ul>
+    </form>
+  </div>
+
+  <div class="card">
+    <h2>当前活动规则
+      {% if active %}
+      <span class="tag tag-active">{{ active.filename }}</span>
+      {% else %}
+      <span class="tag tag-old">暂无</span>
+      {% endif %}
+    </h2>
+    {% if active %}
+    <p class="muted">
+      规则集 #{{ active.id }}，上传时间 {{ active.uploaded_at }}，
+      共 {{ active.rule_count }} 条，指纹 <code>{{ active.fingerprint[:16] }}…</code>
+    </p>
+    <table>
+      <thead><tr><th>CSV行</th><th>设备编号</th><th>允差 L</th>
+        <th>扩展不确定度 U</th></tr></thead>
+      <tbody>
+      {% for r in rules %}
+      <tr><td>{{ r.line_no }}</td><td>{{ r.device_no }}</td>
+        <td>{{ r.tolerance }}</td><td>{{ r.uncertainty }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="muted">尚未上传规则。上传前所有已完成行都会判为「待核·无对应规则」。</p>
+    {% endif %}
+  </div>
+
+  <div class="card">
+    <h2>规则集历史</h2>
+    {% if rulesets %}
+    <table>
+      <thead><tr><th>#</th><th>文件</th><th>条数</th><th>上传时间</th>
+        <th>状态</th></tr></thead>
+      <tbody>
+      {% for rs in rulesets %}
+      <tr>
+        <td>{{ rs.id }}</td><td>{{ rs.filename }}</td>
+        <td>{{ rs.rule_count }}</td><td class="muted">{{ rs.uploaded_at }}</td>
+        <td>{% if rs.active %}<span class="tag tag-active">活动</span>
+            {% else %}<span class="tag tag-old">已被替换</span>{% endif %}</td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="muted">暂无历史。</p>
+    {% endif %}
+  </div>
+</main>
+<script>
+document.getElementById("rules-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const msg = document.getElementById("msg");
+  const errs = document.getElementById("errors");
+  msg.className = "muted"; msg.textContent = "上传校验中…"; errs.innerHTML = "";
+  const fd = new FormData();
+  fd.append("file", document.getElementById("rules-file").files[0]);
+  const resp = await fetch("/api/rulesets", { method: "POST", body: fd });
+  const data = await resp.json();
+  if (!data.ok) {
+    msg.className = "err"; msg.textContent = data.error;
+    for (const err of (data.errors || [])) {
+      const li = document.createElement("li");
+      li.textContent = err;
+      errs.appendChild(li);
+    }
+    return;
+  }
+  msg.className = "ok";
+  msg.textContent = `已启用规则集 #${data.ruleset_id}（${data.rule_count} 条），原规则集已被替换。`;
+  setTimeout(() => location.reload(), 800);
+});
+</script>
+</body>
+</html>

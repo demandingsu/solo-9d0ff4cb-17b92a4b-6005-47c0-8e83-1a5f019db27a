@@ -47,6 +47,14 @@ B_RUNNING = "running"
 B_PAUSED = "paused"
 B_DONE = "done"
 
+# 符合性评定签发状态
+SIGNED_VALID = "valid"      # 当前有效
+SIGNED_STALE = "stale"      # 签发来源（进度或规则）已变化，判定过期
+SIGNED_STATUS_LABELS = {
+    SIGNED_VALID: "有效",
+    SIGNED_STALE: "已过期（来源已变化）",
+}
+
 STATUS_LABELS = {
     PENDING: "待处理",
     QUERYING: "查询中",

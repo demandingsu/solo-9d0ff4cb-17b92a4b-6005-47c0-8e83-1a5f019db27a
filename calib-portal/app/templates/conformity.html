@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>批次 #{{ batch.id }} 符合性评定</title>
+<style>
+:root { --blue:#1a56a8; --grey:#666; --line:#d0d7de; }
+body { font-family:"PingFang SC","Microsoft YaHei",sans-serif;
+       margin:0; background:#f5f7fa; color:#1f2933; }
+header { background:var(--blue); color:#fff; padding:14px 28px; }
+header a { color:#cfe2ff; margin-right:16px; font-size:13px; }
+main { max-width:1280px; margin:22px auto; padding:0 20px; }
+.card { background:#fff; border:1px solid var(--line); border-radius:8px;
+        padding:18px 22px; margin-bottom:20px; }
+h2 { margin-top:0; font-size:17px; }
+table { width:100%; border-collapse:collapse; font-size:13px; }
+th,td { border:1px solid var(--line); padding:7px 9px; text-align:left;
+        vertical-align:top; }
+th { background:#eef2f7; white-space:nowrap; }
+a { color:var(--blue); }
+.muted { color:var(--grey); font-size:12px; }
+.tag { display:inline-block; padding:2px 8px; border-radius:10px;
+       font-size:12px; white-space:nowrap; }
+.tag-conforming { background:#d3f9d8; color:#17612b; }
+.tag-nonconforming { background:#ffe3e3; color:#a8071a; }
+.tag-pending { background:#fff3bf; color:#8a6200; }
+.tag-ignored { background:#e9ecef; color:#666; }
+.tag-valid { background:#d3f9d8; color:#17612b; }
+.tag-stale { background:#ffe3e3; color:#a8071a; }
+.summary span { display:inline-block; margin-right:16px; font-size:13px; }
+.box { border:1px solid var(--line); border-radius:6px; padding:12px 16px;
+       background:#f8fafc; }
+.box.warn { border-color:#e8a33d; background:#fff8e6; }
+.box.bad { border-color:#c33; background:#fff0f0; }
+.box.good { border-color:#3a3; background:#f0fff4; }
+button { background:var(--blue); color:#fff; border:0; border-radius:6px;
+         padding:8px 18px; font-size:14px; cursor:pointer; }
+button:disabled { background:#9aa5b1; cursor:not-allowed; }
+button.secondary { background:#5a6b7d; }
+input[type=text] { padding:6px 9px; border:1px solid var(--line);
+                   border-radius:5px; font-size:13px; }
+.detail { color:#555; font-size:12px; max-width:380px; word-break:break-all; }
+code { background:#f1f3f5; padding:1px 4px; border-radius:3px; }
+</style>
+</head>
+<body>
+<header>
+  <strong>批次 #{{ batch.id }} 符合性评定</strong>
+  <a href="/">← 批次列表</a>
+  <a href="/batches/{{ batch.id }}">逐行补录状态</a>
+  <a href="/rules">设备允差规则</a>
+</header>
+<main>
+  {% set ev = evaluation %}
+  {% set rs = ev.ruleset %}
+
+  <div class="card">
+    <div class="summary">
+      <span>总行数 <strong>{{ ev.counts.total }}</strong></span>
+      <span>已完成 <strong>{{ ev.counts.completed }}</strong></span>
+      <span>合格 <strong>{{ ev.counts.conforming }}</strong></span>
+      <span>不合格 <strong>{{ ev.counts.nonconforming }}</strong></span>
+      <span>待核 <strong>{{ ev.counts.pending }}</strong></span>
+      <span>已忽略 <strong>{{ ev.counts.ignored }}</strong></span>
+    </div>
+    <p class="muted" style="margin-bottom:6px">
+      评定只使用门户已确认同值的已完成行。判定口径：
+      <code>|示值误差| + U ≤ L</code> 为合格；
+      <code>|示值误差| − U &gt; L</code> 为不合格；
+      两者之间（不确定度区间）待核。未完成行、无规则行也待核；
+      人工忽略行不参与判定，仅在原因列注明忽略原因。
+      本页展示的是<strong>同一时刻</strong>的进度与活动规则。
+    </p>
+    <p class="muted">
+      当前活动规则：
+      {% if rs %}
+        <strong>{{ rs.filename }}</strong>（规则集 #{{ rs.id }}，{{ rs.rule_count }} 条，
+        上传于 {{ rs.uploaded_at }}）
+      {% else %}
+        <span class="tag tag-pending">暂无活动规则，所有已完成行均待核</span>
+      {% endif %}
+      <br>进度指纹 <code>{{ ev.progress_fingerprint[:24] }}…</code>
+      规则指纹 <code>{{ ev.rules_fingerprint[:24] }}…</code>
+    </p>
+    <p><a class="muted" href="/batches/{{ batch.id }}/conformity">↻ 重新评定（刷新快照）</a></p>
+  </div>
+
+  <div class="card">
+    <h2>签发</h2>
+    {% if ev.eligible %}
+    <div class="box good">
+      <p>无待核行且存在已完成行，可以签发。签发会保存本次判定内容
+        （评定结果、所用规则、门户链接与快照指纹）。</p>
+      <p>
+        <label>质控员：<input type="text" id="signed_by" placeholder="姓名/工号"></label>
+        <button id="btn-sign">签发符合性评定</button>
+        <span class="muted" id="sign-msg"></span>
+      </p>
+      <p class="muted">若签发时进度或活动规则已与上方快照不同，服务端将拒绝签发。</p>
+    </div>
+    {% else %}
+    <div class="box warn">
+      <strong>当前不可签发：</strong>{{ ev.eligibility_reason }}
+    </div>
+    {% endif %}
+  </div>
+
+  <div class="card">
+    <h2>逐行评定</h2>
+    <table>
+      <thead><tr>
+        <th>CSV行</th><th>设备编号</th><th>校准日期</th><th>示值误差</th>
+        <th>补录状态</th><th>规则 L / U</th><th>评定</th><th>原因</th>
+        <th>门户链接</th>
+      </tr></thead>
+      <tbody>
+      {% for r in ev.rows %}
+      <tr>
+        <td>{{ r.line_no }}</td>
+        <td>{{ r.device_no }}</td>
+        <td>{{ r.cal_date }}</td>
+        <td>{{ r.indication_error }}</td>
+        <td class="muted">{{ r.row_status_label }}</td>
+        <td>{% if r.tolerance is not none %}
+              L={{ r.tolerance }}<br>U={{ r.uncertainty }}
+            {% else %}<span class="muted">—</span>{% endif %}</td>
+        <td><span class="tag tag-{{ r.result }}">{{ r.result_label }}</span></td>
+        <td class="detail">{{ r.reason }}</td>
+        <td>{% if r.portal_record_url %}
+              <a href="{{ r.portal_record_url }}" target="_blank">门户记录↗</a>
+            {% else %}<span class="muted">—</span>{% endif %}</td>
+      </tr>
+      {% endfor %}
+      {% for r in ev.ignored_rows %}
+      <tr>
+        <td>{{ r.line_no }}</td>
+        <td>{{ r.device_no }}</td>
+        <td>{{ r.cal_date }}</td>
+        <td>{{ r.indication_error }}</td>
+        <td class="muted">{{ r.row_status_label }}</td>
+        <td><span class="muted">—</span></td>
+        <td><span class="tag tag-ignored">{{ r.result_label }}</span></td>
+        <td class="detail">{{ r.reason }}</td>
+        <td><span class="muted">—</span></td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <h2>签发记录</h2>
+    {% if signatures %}
+    <table>
+      <thead><tr><th>#</th><th>签发时间</th><th>质控员</th><th>状态</th>
+        <th>规则集</th><th>结果</th><th>说明</th><th></th></tr></thead>
+      <tbody>
+      {% for s in signatures %}
+      {% set p = payloads[s.id] %}
+      <tr>
+        <td>{{ s.id }}</td>
+        <td class="muted">{{ s.signed_at }}</td>
+        <td>{{ s.signed_by or "—" }}</td>
+        <td><span class="tag tag-{{ s.status }}">{{ signature_labels[s.status] }}</span></td>
+        <td>#{{ s.ruleset_id }}</td>
+        <td>合格 {{ p.counts.conforming }} / 不合格 {{ p.counts.nonconforming }}
+            / 待核 {{ p.counts.pending }}</td>
+        <td class="detail">{{ s.stale_reason or "" }}</td>
+        <td><a href="/signatures/{{ s.id }}">查看原签发内容 →</a></td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="muted">尚未签发。</p>
+    {% endif %}
+  </div>
+</main>
+<script>
+const BATCH_ID = {{ batch.id }};
+const PROGRESS_FP = {{ ev.progress_fingerprint | tojson }};
+const RULES_FP = {{ ev.rules_fingerprint | tojson }};
+const ELIGIBLE = {{ ev.eligible | tojson }};
+
+async function sign() {
+  const msg = document.getElementById("sign-msg");
+  const btn = document.getElementById("btn-sign");
+  btn.disabled = true;
+  msg.className = "muted"; msg.textContent = "签发中…";
+  const fd = new FormData();
+  fd.append("progress_fingerprint", PROGRESS_FP);
+  fd.append("rules_fingerprint", RULES_FP);
+  fd.append("signed_by", document.getElementById("signed_by").value);
+  const resp = await fetch(`/api/batches/${BATCH_ID}/sign`, {
+    method: "POST", body: fd,
+  });
+  const data = await resp.json();
+  if (!data.ok) {
+    msg.className = "err";
+    msg.textContent = "签发被拒：" + data.error;
+    btn.disabled = false;
+    return;
+  }
+  location.href = data.detail_url;
+}
+
+if (ELIGIBLE) document.getElementById("btn-sign").onclick = sign;
+</script>
+</body>
+</html>

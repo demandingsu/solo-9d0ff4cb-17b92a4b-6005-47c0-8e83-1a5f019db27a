@@ -33,16 +33,19 @@ calib-portal/
 ├── Dockerfile.app          # 含 Chromium 与中文字体的填报助手镜像
 ├── Dockerfile.portal       # 无账号模拟旧门户镜像
 ├── app/                    # FastAPI 填报助手
-│   ├── webapp.py           # 页面与 API（上传、逐行状态、人工操作）
+│   ├── webapp.py           # 页面与 API（上传、逐行状态、人工操作、规则、签发）
 │   ├── worker.py           # 后台工作线程与安全状态机
 │   ├── automation.py       # Playwright 封装（专属线程执行同步 API）
-│   ├── database.py         # SQLite 持久化
+│   ├── database.py         # SQLite 持久化（进度 / 规则集 / 签发）
+│   ├── conformity.py       # 规则 CSV 校验与符合性评定（纯函数）
 │   ├── csvutil.py          # CSV 解析与示值误差同值比较
 │   ├── config.py           # 状态常量与配置
-│   └── templates/          # 上传页 / 批次逐行状态页
+│   └── templates/          # 上传页 / 逐行状态 / 规则 / 评定 / 签发页
 ├── portal/                 # 模拟旧门户（服务端渲染表单 + 查询页）
 │   └── app.py              # 含故障注入：drop_submit / query_500
-├── data/sample.csv         # 示例 CSV
+├── data/sample.csv         # 示例补录 CSV
+├── data/rules.csv          # 示例设备允差规则 CSV
+├── tests/                  # 离线单元测试（补录逻辑 + 符合性评定）
 └── demo.sh                 # 宿主机端到端演示脚本
 ```
 
@@ -67,6 +70,10 @@ docker compose up --build
 | EQ-1004 / 2026-11-03 / +0.02 | 同设备同日期两条 | 暂停·多条 |
 | EQ-1001 等其余行 | 查无 | 查询确认无记录后提交，再复核记完成 |
 
+随后打开「设备允差规则」页上传 `data/rules.csv`，再进入各批次的「符合性评定」
+页即可看到逐行合格/不合格/待核结果；若有待核行会提示不可签发。只有全部行
+已完成且无待核后才可签发，签发后的判定冻结保存并附门户链接与所用规则。
+
 ## 四、三个故障演示
 
 1. **保存成功后断线**：门户后台把故障模式切到 `drop_submit`（门户会先把记录落库，
@@ -83,26 +90,83 @@ docker compose up --build
 ## 五、网页与接口
 
 - `GET /` 上传页与批次列表
+- `GET /rules` 设备允差规则：上传规则 CSV、查看当前活动规则与历史
 - `GET /batches/{id}` 逐行状态页（2 秒自动刷新，含状态、说明、截图、门户记录链接、
   尝试次数、人工操作按钮）
+- `GET /batches/{id}/conformity` 符合性评定与签发页
+- `GET /signatures/{id}` 某次签发的原始内容（含过期状态与原因）
 - `POST /api/batches` 上传 CSV 建批（multipart：`portal_url`、`file`）
 - `POST /api/batches/{id}/resume` 续办（仅处理待处理行）
 - `POST /api/rows/{id}/retry-query` 暂停行重新查询（只查不提）
 - `POST /api/rows/{id}/mark-done` 人工核实记完成（须提交门户记录链接）
 - `POST /api/rows/{id}/resubmit` 人工显式授权后才允许重新走 查→提→复核
 - `POST /api/rows/{id}/ignore` 人工忽略
+- `POST /api/rulesets` 上传规则 CSV（multipart：`file`）
+- `GET /api/rulesets` 规则集历史
+- `GET /api/batches/{id}/conformity` 当前一致快照下的评定结果与签发列表
+- `POST /api/batches/{id}/sign` 签发（multipart：`progress_fingerprint`、
+  `rules_fingerprint`、`signed_by`）
+- `GET /api/signatures/{id}` 单次签发详情
 
-## 六、持久化与数据
+## 六、设备允差与符合性评定
+
+### 规则 CSV
+
+按设备编号列出正数允差 `L` 与非负扩展不确定度 `U`：
+
+```csv
+设备编号,允差L,扩展不确定度U
+EQ-1001,0.10,0.02
+```
+
+必需列可用别名（如 `device_no` / `tolerance_l` / `uncertainty_u`）。整份文件
+逐行校验：**设备编号重复、缺列、L 非正、U 为负、空值或 NaN/Infinity 等无效数值
+均整份拒收**，拒收不会影响原有活动规则；通过校验后在一个写事务中原子替换
+活动规则（规则集历史保留）。
+
+### 判定口径
+
+评定只使用**已完成**的行（门户已确认唯一同值，即 `done_existing` /
+`done_submitted`）。对 `|示值误差| = e`：
+
+| 条件 | 结果 |
+|---|---|
+| `e + U ≤ L` | 合格 |
+| `e − U > L` | 不合格 |
+| 其余（不确定度区间） | 待核 |
+
+未完成的行、活动规则中没有该设备编号的行也判为**待核**；人工忽略的行不参与
+判定，但在原因列注明忽略原因（包括上传 CSV 中重复行的原因）。
+
+### 签发
+
+只有当批次**没有待核行且至少有一行已完成**时才能签发。签发结果保存：
+逐行判定、所用规则快照、门户记录链接、规则集与两枚指纹、质控员与时间。
+
+### 并发一致性
+
+- 评定读快照与签发写事务都从同一 SQLite 事务取「批次进度 + 活动规则 +
+  规则行」，确保评定与签发对应**同一份进度和规则**。
+- 签发接口要求前端提交页面上展示的进度指纹与规则指纹；服务端在
+  `BEGIN IMMEDIATE` 写事务中重新计算快照并比对，来源已变则返回 `409`
+  拒绝签发，绝不按旧快照落库。
+- 签发后若进度被后台补录/人工处理改变，或活动规则被替换，仍为有效的签发
+  立即标记为**过期**并记录原因；签发页同时会在读取时复核一次。原签发内容
+  （`payload`）完整保留，不会被后续变化改写。
+
+## 七、持久化与数据
 
 - SQLite 数据库、上传的 CSV、浏览器失败截图都在应用容器 `/data`（compose 卷
   `app-data`），重启不丢；门户数据在卷 `portal-data`。
 - 行状态：`pending / querying / done_existing / done_submitted /
   paused_no_record / paused_multi / paused_diff / paused_query_fail /
   paused_submit_fail / ignored`。
+- 规则集（`rulesets` / `rules`）与签发（`signatures`，含完整 payload 与
+  过期信息）同样在 SQLite 中持久化；签发状态：`valid / stale`。
 - 示值误差按数值比较（`+0.03` 与 `0.030` 视为同值），日期支持
   `YYYY-MM-DD / YYYY/MM/DD / YYYYMMDD` 等写法并统一归一。
 
-## 七、设计说明
+## 八、设计说明
 
 - Playwright 同步 API 不能运行在 FastAPI 的 asyncio 线程，所有浏览器调用都通过
   队列交给一个专属「playwright-runner」线程执行；业务工作线程是另一个独立线程。

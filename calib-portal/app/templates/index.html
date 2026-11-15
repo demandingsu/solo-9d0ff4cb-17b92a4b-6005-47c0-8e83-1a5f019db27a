@@ -46,7 +46,20 @@ a { color:var(--blue); }
 </style>
 </head>
 <body>
-<header><h1>校准读数补录助手（FastAPI + Playwright + SQLite）</h1></header>
+<header>
+  <h1>校准读数补录助手（FastAPI + Playwright + SQLite）</h1>
+  <nav style="margin-top:8px">
+    <a href="/rules" style="color:#cfe2ff;margin-right:18px;font-size:13px">
+      设备允差规则</a>
+    {% if active_ruleset %}
+    <span style="font-size:12px;color:#cfe2ff">
+      当前规则：{{ active_ruleset.filename }}（#{{ active_ruleset.id }}，
+      {{ active_ruleset.rule_count }} 条）</span>
+    {% else %}
+    <span style="font-size:12px;color:#ffd8a8">尚未上传设备允差规则</span>
+    {% endif %}
+  </nav>
+</header>
 <main>
   <div class="card">
     <h2>新建填报批次</h2>
@@ -83,7 +96,9 @@ a { color:var(--blue); }
         <td><span class="pill pill-{{ b.status }}">{{ b.status }}</span></td>
         <td class="muted">{{ b.note }}</td>
         <td class="muted">{{ b.created_at }}</td>
-        <td><a href="/batches/{{ b.id }}">查看逐行状态 →</a></td>
+        <td><a href="/batches/{{ b.id }}">查看逐行状态 →</a>
+          &nbsp;|&nbsp;
+          <a href="/batches/{{ b.id }}/conformity">符合性评定 →</a></td>
       </tr>
       {% endfor %}
       </tbody>

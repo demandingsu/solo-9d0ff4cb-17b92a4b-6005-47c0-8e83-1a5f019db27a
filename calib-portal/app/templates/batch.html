@@ -51,6 +51,7 @@ input[type=url],input[type=text] { width:260px; padding:5px 8px;
   <a href="/">← 返回批次列表</a>
   <a href="{{ batch.portal_url }}/records" target="_blank">打开门户查询页</a>
   <a href="{{ batch.portal_url }}/admin/records" target="_blank">门户管理后台（故障注入）</a>
+  <a href="/batches/{{ batch.id }}/conformity">符合性评定 / 签发 →</a>
 </header>
 <main>
   <div class="card">
@@ -77,7 +78,9 @@ input[type=url],input[type=text] { width:260px; padding:5px 8px;
         <th style="min-width:280px">人工操作</th>
       </tr></thead>
       <tbody id="rows-body"></tbody>
+      <tbody id="ignored-body"></tbody>
     </table>
+    <p class="muted" id="ignored-note"></p>
   </div>
 </main>
 
@@ -154,6 +157,23 @@ async function refresh() {
       <td>${row.attempts}</td>
       <td>${actionCell(row)}</td>
     </tr>`).join("");
+
+  document.getElementById("ignored-body").innerHTML =
+    (data.ignored_lines || []).map(line => `
+      <tr>
+        <td>${line.line_no}</td>
+        <td>${esc(line.device_no)}</td>
+        <td>${esc(line.cal_date)}</td>
+        <td>${esc(line.indication_error)}</td>
+        <td><span class="tag tag-ignored">已忽略（CSV 重复行）</span></td>
+        <td class="detail">${esc(line.reason)}</td>
+        <td><span class="muted">—</span></td>
+        <td>0</td>
+        <td><span class="muted">—</span></td>
+      </tr>`).join("");
+  document.getElementById("ignored-note").textContent = (data.ignored_lines || []).length
+    ? `另有 ${data.ignored_lines.length} 行因在 CSV 内重复而被忽略，不参与补录与评定（原因见上表）。`
+    : "";
 }
 
 async function retryQuery(id) { await post(`/api/rows/${id}/retry-query`); refresh(); }

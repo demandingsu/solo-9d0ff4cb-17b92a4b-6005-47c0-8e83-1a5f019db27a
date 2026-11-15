@@ -38,7 +38,11 @@ curl -fsS "http://127.0.0.1:$PORT/" -o /dev/null
 curl -fsS "http://127.0.0.1:$APPPORT/" -o /dev/null
 echo "   门户: http://localhost:$PORT  助手: http://localhost:$APPPORT"
 
-echo "== 2. 上传示例 CSV（含同值跳过 / 异值暂停 / 多条暂停三种种子情形）=="
+echo "== 2. 上传设备允差规则 CSV（整份校验，替换活动规则）=="
+curl -fsS -F "file=@$ROOT/data/rules.csv" \
+  "http://127.0.0.1:$APPPORT/api/rulesets" | head -c 300; echo
+
+echo "== 2b. 上传示例 CSV（含同值跳过 / 异值暂停 / 多条暂停三种种子情形）=="
 curl -fsS -F "portal_url=http://127.0.0.1:$PORT" \
   -F "file=@$ROOT/data/sample.csv" \
   "http://127.0.0.1:$APPPORT/api/batches" | head -c 300; echo
@@ -46,6 +50,9 @@ sleep 25
 echo "   批次 1 逐行状态："
 curl -fsS "http://127.0.0.1:$APPPORT/api/batches/1/rows" \
   | "$VENV/bin/python" -c "import sys,json;d=json.load(sys.stdin);[print(f\"   - {r['device_no']} {r['cal_date']} {r['indication_error']}: {r['status']}\") for r in d['rows']]"
+echo "   批次 1 符合性评定（仍有暂停/待核行，应不可签发）："
+curl -fsS "http://127.0.0.1:$APPPORT/api/batches/1/conformity" \
+  | "$VENV/bin/python" -c "import sys,json;d=json.load(sys.stdin);e=d['evaluation'];print('   计数:',e['counts'],'可签发:',e['eligible'],'-',e['eligibility_reason'])"
 
 echo "== 3. 演示保存后断线：门户注入 drop_submit 故障后提交新行 =="
 curl -fsS -X POST -d "mode=drop_submit" "http://127.0.0.1:$PORT/admin/fault" -o /dev/null
@@ -78,7 +85,8 @@ curl -fsS "http://127.0.0.1:$APPPORT/api/batches/1/rows" \
 
 echo
 echo "演示完成。浏览器打开："
-echo "  填报助手  http://localhost:$APPPORT"
-echo "  门户后台  http://localhost:$PORT/admin/records"
+echo "  填报助手      http://localhost:$APPPORT"
+echo "  规则与符合性  http://localhost:$APPPORT/rules"
+echo "  门户后台      http://localhost:$PORT/admin/records"
 echo "数据目录: $DATA"
 wait

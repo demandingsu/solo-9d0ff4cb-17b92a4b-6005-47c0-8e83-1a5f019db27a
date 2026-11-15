@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>签发 #{{ signature.id }}</title>
+<style>
+:root { --blue:#1a56a8; --grey:#666; --line:#d0d7de; }
+body { font-family:"PingFang SC","Microsoft YaHei",sans-serif;
+       margin:0; background:#f5f7fa; color:#1f2933; }
+header { background:var(--blue); color:#fff; padding:14px 28px; }
+header a { color:#cfe2ff; margin-right:16px; font-size:13px; }
+main { max-width:1180px; margin:22px auto; padding:0 20px; }
+.card { background:#fff; border:1px solid var(--line); border-radius:8px;
+        padding:18px 22px; margin-bottom:20px; }
+h2 { margin-top:0; font-size:17px; }
+table { width:100%; border-collapse:collapse; font-size:13px; }
+th,td { border:1px solid var(--line); padding:7px 9px; text-align:left;
+        vertical-align:top; }
+th { background:#eef2f7; white-space:nowrap; }
+a { color:var(--blue); }
+.muted { color:var(--grey); font-size:12px; }
+.tag { display:inline-block; padding:2px 8px; border-radius:10px;
+       font-size:12px; white-space:nowrap; }
+.tag-conforming { background:#d3f9d8; color:#17612b; }
+.tag-nonconforming { background:#ffe3e3; color:#a8071a; }
+.tag-pending { background:#fff3bf; color:#8a6200; }
+.tag-ignored { background:#e9ecef; color:#666; }
+.tag-valid { background:#d3f9d8; color:#17612b; }
+.tag-stale { background:#ffe3e3; color:#a8071a; }
+.box { border:1px solid var(--line); border-radius:6px; padding:12px 16px;
+       background:#f8fafc; }
+.box.stale { border-color:#c33; background:#fff0f0; }
+.box.valid { border-color:#3a3; background:#f0fff4; }
+code { background:#f1f3f5; padding:1px 4px; border-radius:3px; }
+.detail { color:#555; font-size:12px; max-width:360px; word-break:break-all; }
+</style>
+</head>
+<body>
+<header>
+  <strong>符合性评定签发 #{{ signature.id }}</strong>
+  <a href="/">← 批次列表</a>
+  <a href="/batches/{{ signature.batch_id }}/conformity">返回当前评定</a>
+</header>
+<main>
+  {% set p = payload %}
+  <div class="card">
+    <div class="box {{ 'stale' if signature.status != 'valid' else 'valid' }}">
+      <p>
+        <span class="tag tag-{{ signature.status }}">{{ signature_labels[signature.status] }}</span>
+        {% if signature.status != 'valid' %}
+        <br><strong>过期原因：</strong>{{ signature.stale_reason }}
+        <br><span class="muted">过期时间：{{ signature.stale_at }}。
+          本页保留的是签发当时的原始内容，不会被后续变化改写；如需有效判定，
+          请基于最新进度与规则重新评定并签发。</span>
+        {% else %}
+        <br><span class="muted">签发后进度与活动规则均未变化。</span>
+        {% endif %}
+      </p>
+    </div>
+    <h2 style="margin-top:16px">签发信息</h2>
+    <table>
+      <tr><th>批次</th><td>#{{ signature.batch_id }}
+        （{{ batch.portal_url if batch else '—' }} / {{ batch.filename if batch else '—' }}）</td></tr>
+      <tr><th>门户链接</th><td>
+        {% if batch %}<a href="{{ batch.portal_url }}" target="_blank">{{ batch.portal_url }}</a>{% endif %}</td></tr>
+      <tr><th>签发时间</th><td>{{ signature.signed_at }}</td></tr>
+      <tr><th>质控员</th><td>{{ signature.signed_by or "—" }}</td></tr>
+      <tr><th>规则集</th><td>#{{ signature.ruleset_id }}
+        {% if p.ruleset %}（{{ p.ruleset.filename }}，{{ p.ruleset.rule_count }} 条，
+        上传于 {{ p.ruleset.uploaded_at }}）{% endif %}</td></tr>
+      <tr><th>进度指纹</th><td><code>{{ signature.progress_fingerprint }}</code></td></tr>
+      <tr><th>规则指纹</th><td><code>{{ signature.rules_fingerprint }}</code></td></tr>
+      <tr><th>结果汇总</th><td>
+        总行数 {{ p.counts.total }}，已完成 {{ p.counts.completed }}，
+        合格 {{ p.counts.conforming }}，不合格 {{ p.counts.nonconforming }}，
+        待核 {{ p.counts.pending }}，已忽略 {{ p.counts.ignored }}</td></tr>
+    </table>
+  </div>
+
+  <div class="card">
+    <h2>所用规则（签发快照）</h2>
+    <table>
+      <thead><tr><th>CSV行</th><th>设备编号</th><th>允差 L</th>
+        <th>扩展不确定度 U</th></tr></thead>
+      <tbody>
+      {% for r in p.rules %}
+      <tr><td>{{ r.line_no }}</td><td>{{ r.device_no }}</td>
+        <td>{{ r.tolerance }}</td><td>{{ r.uncertainty }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <h2>逐行判定（签发快照）</h2>
+    <table>
+      <thead><tr>
+        <th>CSV行</th><th>设备编号</th><th>校准日期</th><th>示值误差</th>
+        <th>规则 L / U</th><th>评定</th><th>原因</th><th>门户链接</th>
+      </tr></thead>
+      <tbody>
+      {% for r in p.rows %}
+      <tr>
+        <td>{{ r.line_no }}</td>
+        <td>{{ r.device_no }}</td>
+        <td>{{ r.cal_date }}</td>
+        <td>{{ r.indication_error }}</td>
+        <td>{% if r.tolerance is not none %}L={{ r.tolerance }}<br>U={{ r.uncertainty }}
+            {% else %}<span class="muted">—</span>{% endif %}</td>
+        <td><span class="tag tag-{{ r.result }}">{{ r.result_label }}</span></td>
+        <td class="detail">{{ r.reason }}</td>
+        <td>{% if r.portal_record_url %}
+              <a href="{{ r.portal_record_url }}" target="_blank">门户记录↗</a>
+            {% else %}<span class="muted">—</span>{% endif %}</td>
+      </tr>
+      {% endfor %}
+      {% for r in p.ignored_rows %}
+      <tr>
+        <td>{{ r.line_no }}</td>
+        <td>{{ r.device_no }}</td>
+        <td>{{ r.cal_date }}</td>
+        <td>{{ r.indication_error }}</td>
+        <td><span class="muted">—</span></td>
+        <td><span class="tag tag-ignored">{{ r.result_label }}</span></td>
+        <td class="detail">{{ r.reason }}</td>
+        <td><span class="muted">—</span></td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</main>
+</body>
+</html>
